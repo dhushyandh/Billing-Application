@@ -14,8 +14,40 @@ import bookingRoutes from './routes/bookings.js';
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Reuse the same connection/initialization promise across warm serverless invocations.
+let databaseInitialization;
+
+function ensureDatabase() {
+  if (!databaseInitialization) {
+    databaseInitialization = (async () => {
+      await connectDB();
+      await seedDatabase();
+    })().catch((error) => {
+      // Permit a later invocation to retry if MongoDB was temporarily unavailable.
+      databaseInitialization = undefined;
+      throw error;
+    });
+  }
+
+  return databaseInitialization;
+}
+
 app.use(cors());
 app.use(express.json({ limit: '20mb' }));
+
+// Initialize MongoDB before any API route is executed. Vercel invokes the
+// exported Express app as a serverless handler; it must not call app.listen().
+app.use(async (_req, res, next) => {
+  try {
+    await ensureDatabase();
+    next();
+  } catch (error) {
+    console.error('Database initialization failed:', error);
+    res.status(503).json({
+      error: 'Database unavailable. Please try again shortly.',
+    });
+  }
+});
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'IJAZ TRADERS GST Billing API' });
@@ -29,18 +61,19 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/storefront', storefrontRoutes);
 app.use('/api/bookings', bookingRoutes);
 
-async function start() {
-  try {
-    await connectDB();
-    await seedDatabase();
-    app.listen(PORT, () => {
-      console.log(`Backend server running on http://localhost:${PORT}`);
+// Vercel detects and invokes this exported Express application.
+export default app;
+
+// Keep the same entry point usable for local development.
+if (process.env.VERCEL !== '1') {
+  ensureDatabase()
+    .then(() => {
+      app.listen(PORT, () => {
+        console.log(`Backend server running on http://localhost:${PORT}`);
+      });
+    })
+    .catch((error) => {
+      console.error('Failed to start server:', error);
+      process.exitCode = 1;
     });
-  } catch (err) {
-    console.error('Failed to start server:', err);
-    process.exit(1);
-  }
 }
-
-start();
-
