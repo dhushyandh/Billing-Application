@@ -1,26 +1,29 @@
 import mongoose from 'mongoose';
 
 export async function connectDB() {
-  const primaryUri =
-    process.env.MONGODB_URI ||
-    process.env.MONGO_URI ||
-    'mongodb://127.0.0.1:27017/ijaz_traders_gst';
-  const localFallback = 'mongodb://127.0.0.1:27017/ijaz_traders_gst';
+  const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI;
+
+  if (!mongoUri) {
+    throw new Error(
+      'MONGODB_URI is missing. Add the MongoDB Atlas connection string to the Vercel backend project environment.'
+    );
+  }
 
   try {
-    await mongoose.connect(primaryUri, {
-      serverSelectionTimeoutMS: 5000,
+    await mongoose.connect(mongoUri, {
+      serverSelectionTimeoutMS: 10000,
       family: 4,
     });
     console.log(`MongoDB connected: ${mongoose.connection.host}`);
-  } catch (err) {
-    console.warn(`Primary MongoDB connection failed (${err.message}).`);
-    if (primaryUri !== localFallback) {
-      console.warn('Falling back to local MongoDB at 127.0.0.1:27017...');
-      await mongoose.connect(localFallback, { serverSelectionTimeoutMS: 5000 });
-      console.log(`MongoDB connected (local fallback): ${mongoose.connection.host}`);
-    } else {
-      throw err;
+  } catch (error) {
+    const message = error?.message || '';
+
+    if (/whitelist|IP address|not authorized/i.test(message)) {
+      throw new Error(
+        'MongoDB Atlas rejected the Vercel server IP. Update the Atlas Network Access IP access list to allow the backend deployment, then redeploy.'
+      );
     }
+
+    throw error;
   }
 }
